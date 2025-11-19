@@ -8,8 +8,8 @@ retry_on = True
 small_example = True
 n_example = 10
 
-df = pd.read_csv("gbk-annotation-table.csv", na_filter=False)
-ground_truth = pd.read_csv("computationally-annotated-gbk-annotation-table.csv", na_filter=False)
+df = pd.read_csv("../data/Maddamsetti2024/gbk-annotation-table.csv", na_filter=False)
+ground_truth = pd.read_csv("../data/Maddamsetti2024/computationally-annotated-gbk-annotation-table.csv", na_filter=False)
 
 if small_example:
     df = df.head(n=n_example)
@@ -68,7 +68,7 @@ for i in range(nrow):
 
 df['Annotation'] = annotations
 
-df.to_csv("latest_result_gbk-annotation-table.csv", index=False)
+df.to_csv("../results/latest_result_gbk-annotation-table.csv", index=False)
 
 n_correct = sum(df['Annotation'] == ground_truth['Annotation'])
 print("Accuracy: " + str(n_correct/nrow) + " (" + str(n_correct) + " out of " + str(nrow) + ")")
