@@ -1,21 +1,17 @@
 ## simple-ARG-duplication-analysis.R by Rohan Maddamsetti.
 ## analyse the distribution of antibiotic resistance genes (ARGs)
-## on chromosomes versus plasmids in  fully-sequenced genomes and plasmids
+## on chromosomes versus plasmids in fully-sequenced genomes and plasmids
 ## in the NCBI RefSeq database (dated March 26 2021).
+
+## !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+## CRITICAL TODO: Fix upstream bug where Anthropogenic is Anthropogeni.
+## !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+## CRITICAL TODO: Fix upstream bug where Environmental is Environmenta
 
 library(tidyverse)
 library(cowplot)
-library(ggrepel)
 library(data.table)
-
-################################################################################
-
-fancy_scientific <- function(x) {
-    ## function for plotting better axis labels.
-    ## see solution here for nice scientific notation on axes.
-    ## https://stackoverflow.com/questions/10762287/how-can-i-format-axis-labels-with-exponents-with-ggplot2-and-scales
-    ifelse(x==0, "0", parse(text=gsub("[+]", "", gsub("e", " %*% 10^", scales::scientific_format()(x)))))
-}
+library(stringi)
 
 ################################################################################
 ## Regular expressions used in this analysis.
@@ -49,64 +45,15 @@ antibiotic.keywords <- paste(chloramphenicol.keywords, tetracycline.keywords, ML
 
 antibiotic.or.MGE.keywords <- paste(MGE.keywords,antibiotic.keywords,sep="|")
 
-
-categorize.as.MGE.ARG.or.other <- function(product) {
-    if (is.na(product))
-        return("Other function")
-    else if (str_detect(product, antibiotic.keywords))
-        return("ARG")
-    else if (str_detect(product, MGE.keywords))
-        return("MGE")
-    else
-        return("Other function")
-}
-
-
 ################################################################################
-## Set up the key data structures for the analysis:
-## gbk.annotation, in particular.
+## Functions
 
-gbk.annotation <- read.csv("../data/Maddamsetti2024/FileS3-Complete-Genomes-with-Duplicated-ARG-annotation.csv") %>%
-  as_tibble()
-
-#gbk.annotation <- read.csv(
-#    "../results/computationally-annotated-gbk-annotation-table.csv") %>%
-#    as_tibble() %>%
-    ## filter based on QCed.genomes.
-#    filter(Annotation_Accession %in% QCed.genomes$Annotation_Accession) %>%
-    ## remove the overlaps with the Hawkey et al. (2022) clinical validation data.
-#    filter(!(Annotation_Accession %in% Hawkey.overlaps.in.gbk.annotation.vec)) %>%
-    ## refer to NA annotations as "Unannotated".
-#    mutate(Annotation = replace_na(Annotation,"Unannotated")) %>%
-    ## collapse Annotations into a smaller number of categories as follows:
-    ## Marine, Freshwater --> Water
-    ## Sediment, Soil, Terrestrial --> Earth
-    ## Plants, Agriculture, Animals --> Plants & Animals
-#    mutate(Annotation = replace(Annotation, Annotation == "Marine", "Water")) %>%
-#    mutate(Annotation = replace(Annotation, Annotation == "Freshwater", "Water")) %>%
-#    mutate(Annotation = replace(Annotation, Annotation == "Sediment", "Earth")) %>%
-#    mutate(Annotation = replace(Annotation, Annotation == "Soil", "Earth")) %>%
-#    mutate(Annotation = replace(Annotation, Annotation == "Terrestrial", "Earth")) %>%
-#    mutate(Annotation = replace(Annotation, Annotation == "Plants", "Plants & Animals")) %>%
-#    mutate(Annotation = replace(Annotation, Annotation == "Agriculture", "Plants & Animals")) %>%
-#    mutate(Annotation = replace(Annotation, Annotation == "Animals", "Plants & Animals")) %>%
-    ## get species name annotation from episome.database.
-#    left_join(episome.database) %>%
-    ## Annotate the genera.
-#    mutate(Genus = stringr::word(Organism, 1)) %>%
-    ## CRITICAL STEP: remove the NCBI_Nucleotide_Accession and SequenceType columns.
-    ## This is absolutely critical, otherwise each row is duplicated for every
-    ## chromosome and plasmid, breaking the invariant that each row refers to one sequence,
-    ## when we add this annotation to duplicate.proteins and singleton.proteins.
-#    select(-NCBI_Nucleotide_Accession, -SequenceType) %>%
-    ## and we have to explicitly remove redundant rows now.
-#    distinct() %>%
-    ## And now remove all Unannotated genomes, since these are not analyzed
-    ## at all in this first paper.
-#    filter(Annotation != "Unannotated") %>%
-    ## and remove any strains (although none should fall in this category)
-    ## that were not annotated by annotate-ecological-category.py.
-#    filter(Annotation != "blank")
+fancy_scientific <- function(x) {
+    ## function for plotting better axis labels.
+    ## see solution here for nice scientific notation on axes.
+    ## https://stackoverflow.com/questions/10762287/how-can-i-format-axis-labels-with-exponents-with-ggplot2-and-scales
+    ifelse(x==0, "0", parse(text=gsub("[+]", "", gsub("e", " %*% 10^", scales::scientific_format()(x)))))
+}
 
 ## return the first column for several tables.
 ## shows the number of isolates in each category.
@@ -119,39 +66,49 @@ make.isolate.totals.col <- function(gbk.annotation) {
 }
 
 
-## This vector is used for ordering axes in figures and tables.
-order.by.total.isolates <- make.isolate.totals.col(gbk.annotation)$Annotation
+read.LLM.gbk.annotation.csv <- function(gbk.annotation.path, ground.truth.gbk.annotation) {
+    
+    ## only select Annotation_Accession, Organism, Strain, Genus columns from ground_truth_gbk.annotation.
+    relevant.ground.truth <- ground.truth.gbk.annotation %>%
+        select(Annotation_Accession, Organism, Strain, Genus)
+    
+    gbk.annotation.path %>%
+        read.csv() %>%
+        as_tibble() %>%
+        ## filter based on ground truth genomes
+        inner_join(relevant.ground.truth) %>%
+        ## refer to NA annotations as "Unannotated".
+        mutate(Annotation = replace_na(Annotation,"Unannotated")) %>%
+        ## collapse Annotations into a smaller number of categories as follows:
+        ## Marine, Freshwater --> Water
+        ## Sediment, Soil, Terrestrial --> Earth
+        ## Plants, Agriculture, Animals --> Plants & Animals
+        ## Anthropogenic -> Human-impacted
+        mutate(Annotation = replace(Annotation, Annotation == "Marine", "Water")) %>%
+        mutate(Annotation = replace(Annotation, Annotation == "Freshwater", "Water")) %>%
+        mutate(Annotation = replace(Annotation, Annotation == "Sediment", "Earth")) %>%
+        mutate(Annotation = replace(Annotation, Annotation == "Soil", "Earth")) %>%
+        mutate(Annotation = replace(Annotation, Annotation == "Terrestrial", "Earth")) %>%
+        mutate(Annotation = replace(Annotation, Annotation == "Plants", "Plants & Animals")) %>%
+        mutate(Annotation = replace(Annotation, Annotation == "Agriculture", "Plants & Animals")) %>%
+        mutate(Annotation = replace(Annotation, Annotation == "Animals", "Plants & Animals")) %>%
+        ## CRITICAL TODO: FIX THIS UPSTREAM BUG
+        ## !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+        ## !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+        ## !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+    mutate(Annotation = replace(Annotation, Annotation == "Anthropogeni", "Human-impacted")) %>%
+##        mutate(Annotation = replace(Annotation, Annotation == "Anthropogenic", "Human-impacted")) %>%
+        ## And now remove all Unannotated genomes, since these are not analyzed
+        ## at all in this first paper.
+        filter(Annotation != "Unannotated") %>%
+        ## and remove any strains (although none should fall in this category)
+        ## that were not annotated by annotate-ecological-category.py.
+        filter(Annotation != "blank")
+}
 
-
-## read in duplicate proteins with sequences, using a separate file.
-## I want the sequence column for the duplicate genes,
-## but not for the singletons, to save memory.
-duplicate.proteins <- read.csv("../data/Maddamsetti2024/duplicate-proteins.csv") %>%
-    ## now merge with gbk annotation.
-    inner_join(gbk.annotation) %>%
-    mutate(Category = sapply(product, categorize.as.MGE.ARG.or.other))
-
-
-## import the 37GB file containing all proteins, including singletons.
-## I can save a ton of memory if I don't import the sequence column,
-## and by using the data.table package for import.
-singleton.proteins <- data.table::fread("../data/Maddamsetti2024/all-proteins.csv",
-                                        drop="sequence") %>%
-    filter(count == 1) %>%
-    inner_join(gbk.annotation) %>%
-    mutate(Category = sapply(product, categorize.as.MGE.ARG.or.other))
-        
-duplicate.ARGs <- duplicate.ARGs.by.keyword
-duplicate.MGE.genes <- duplicate.MGE.genes.by.keyword
-
-singleton.ARGs <- singleton.proteins %>%
-    filter(str_detect(.$product, antibiotic.keywords))
-
-singleton.MGE.genes <- singleton.proteins %>%
-    filter(str_detect(.$product, MGE.keywords))
 
 ##########################################################################
-## Code and data structures for Figure 4ABC.
+## Functions for Figure 1.
 
 ## See Wikipedia reference:
 ## https://en.wikipedia.org/wiki/Binomial_proportion_confidence_interval
@@ -259,7 +216,7 @@ make.confint.figure.panel <- function(Table, order.by.total.isolates, title,
         theme_classic() +
         ggtitle(title) +
         ## plot CIs.
-        geom_errorbarh(aes(xmin=Left,xmax=Right), height=0.2, size=0.2)
+        geom_errorbarh(aes(xmin=Left,xmax=Right), height=0.2, linewidth=0.2)
     
     if (no.category.label)
         Fig.panel <- Fig.panel +
@@ -268,20 +225,6 @@ make.confint.figure.panel <- function(Table, order.by.total.isolates, title,
     return(Fig.panel)
 }
 
-## Data structure for Figure 4A:
-## normal-approximation confidence intervals for the percentage
-## of isolates with duplicated ARGs.
-TableS1 <- make.TableS1(gbk.annotation, duplicate.ARGs)
-
-
-######################
-## Table S2. Control: does the distribution of ARG singletons
-## (i.e. genes that have NOT duplicated) follow the distribution
-## of sampled isolates?
-
-## No categories are enriched with ARG singletons,
-## as most isolates have a gene that matches an antibiotic keyword.
-## Animal-host isolates are depleted (perhaps due to aphid bacteria isolates?)
 
 make.TableS2 <- function(gbk.annotation, singleton.ARGs) {
 
@@ -305,18 +248,6 @@ make.TableS2 <- function(gbk.annotation, singleton.ARGs) {
     return(TableS2)
 }
 
-## This data frame will be used for Figure 4B.
-TableS2 <- make.TableS2(gbk.annotation, singleton.ARGs)
-
-#########################################################################
-## Table S3. Control: does the number of isolates with duplicate genes
-## follow the sampling distribution of isolates?
-
-## Most follow the expected distribution.
-## however, isolates from animal-hosts are signficantly depleted
-## in duplicate genes: FDR-corrected p = 0.0000314
-## while isolates from anthropogenic environments are weakly enriched
-## in multi-copy genes: FDR-corrected p = 0.0212.
 
 make.TableS3 <- function(gbk.annotation, duplicate.proteins) {
     ## count the number of isolates with duplicated genes in each category.
@@ -338,44 +269,168 @@ make.TableS3 <- function(gbk.annotation, duplicate.proteins) {
     return(TableS3)
 }
 
-## Data structure for Figure 4C.
-TableS3 <- make.TableS3(gbk.annotation, duplicate.proteins)
 
+################################################################################
+## Set up the key data structures for the analysis.
+
+ground.truth.gbk.annotation <- read.csv(
+    "../data/Maddamsetti2024/FileS3-Complete-Genomes-with-Duplicated-ARG-annotation.csv") %>%
+    as_tibble()
+
+## This vector is used for ordering axes in figures and tables.
+order.by.total.isolates <- make.isolate.totals.col(ground.truth.gbk.annotation)$Annotation
+
+ground.truth.duplicate.proteins <- data.table::fread("../data/Maddamsetti2024/duplicate-proteins.csv",
+                                                     drop="sequence") %>%
+    ## now merge with gbk annotation.
+    inner_join(ground.truth.gbk.annotation, by="Annotation_Accession")
+        
+ground.truth.duplicate.ARGs <- ground.truth.duplicate.proteins %>%
+    filter(str_detect(product, antibiotic.keywords))
+
+
+## Import llama3.2 ecological annotations
+llama3.2.gbk.annotation <- read.LLM.gbk.annotation.csv(
+    "../results/llama3.2_latest_gbk-annotation-table.csv",
+    ground.truth.gbk.annotation)
+
+llama3.2.duplicate.proteins <- data.table::fread("../data/Maddamsetti2024/duplicate-proteins.csv",
+                                                 drop="sequence") %>%
+    ## now merge with gbk annotation.
+    inner_join(llama3.2.gbk.annotation, by="Annotation_Accession")
+
+llama3.2.duplicate.ARGs <- llama3.2.duplicate.proteins %>%
+    filter(str_detect(product, antibiotic.keywords))
+
+
+## Now look at singleton proteins.
+ground.truth.singleton.proteins <- data.table::fread("../data/Maddamsetti2024/all-proteins.csv",
+                                                     drop="sequence") %>%
+    filter(count == 1) %>%
+    inner_join(ground.truth.gbk.annotation, by="Annotation_Accession")
+
+## uses 5.7Gb of memory.
+
+print(object.size(ground.truth.singleton.proteins), units = "auto")
+
+## THIS LINE IS VERY SLOW.
+ground.truth.singleton.ARGs <- ground.truth.singleton.proteins[stri_detect_regex(product, antibiotic.keywords)]
+
+## get LifestyleAnnotation, rename to Annotation for existing code to work nicely.
+gbk.reannotation <- read.csv("../results/llama3.2_latest_Complete-Genomes-with-lifestyle-annotation.csv") %>%
+    select(-hasDuplicatedARGs, -Annotation) %>%
+    rename(Annotation = LifestyleAnnotation) %>%
+    ## refer to NA annotations as "Unannotated".
+    mutate(Annotation = replace_na(Annotation,"Unannotated")) %>%
+    ## And now remove all Unannotated genomes, since these are not analyzed
+    ## at all in this first paper.
+    filter(Annotation != "Unannotated") %>%
+    ## CRITICAL TODO: FIX THIS UPSTREAM BUG
+    ## !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+    ## !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+    ## !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+    mutate(Annotation = replace(Annotation, Annotation == "Environmenta", "Environmental"))
+
+
+## and merge.
+reannotated.singleton.ARGs <- ground.truth.singleton.ARGs %>%
+    select(-Annotation) %>%
+    left_join(gbk.reannotation)
+
+reannotated.duplicate.ARGs <- ground.truth.duplicate.ARGs %>%
+    select(-Annotation) %>%
+    left_join(gbk.reannotation)
+
+reannotated.duplicate.proteins <- ground.truth.duplicate.proteins %>%
+    select(-Annotation) %>%
+    left_join(gbk.reannotation)
+
+
+##########################################################################
+## Data structures for Figure 1AB.
+
+## Data structure for Figure 1AB:
+## normal-approximation confidence intervals for the percentage
+## of isolates with duplicated ARGs.
+ground.truth.TableS1 <- make.TableS1(ground.truth.gbk.annotation, ground.truth.duplicate.ARGs)
+
+llama3.2.TableS1 <- make.TableS1(llama3.2.gbk.annotation, llama3.2.duplicate.ARGs)
+
+reannotated.TableS1 <- make.TableS1(gbk.reannotation, reannotated.duplicate.ARGs)
+
+######################
+## Table S2. Control: does the distribution of ARG singletons
+## (i.e. genes that have NOT duplicated) follow the distribution
+## of sampled isolates?
+
+## No categories are enriched with ARG singletons,
+## as most isolates have a gene that matches an antibiotic keyword.
+## Animal-host isolates are depleted (perhaps due to aphid bacteria isolates?)
+
+
+## This data frame will be used for Figure 1C.
+TableS2 <- make.TableS2(ground.truth.gbk.annotation, ground.truth.singleton.ARGs)
+
+## This data frame will be used for Figure 1D.
+reannotated.TableS2 <- make.TableS2(gbk.reannotation, reannotated.singleton.ARGs)
+
+#########################################################################
+## Table S3. Control: does the number of isolates with duplicate genes
+## follow the sampling distribution of isolates?
+
+## Most follow the expected distribution.
+## however, isolates from animal-hosts are signficantly depleted
+## in duplicate genes: FDR-corrected p = 0.0000314
+## while isolates from anthropogenic environments are weakly enriched
+## in multi-copy genes: FDR-corrected p = 0.0212.
+
+
+## Data structure for Figure 1E.
+TableS3 <- make.TableS3(ground.truth.gbk.annotation, ground.truth.duplicate.proteins)
+
+## Data structure for Figure 1F
+reannotated.TableS3 <- make.TableS1(gbk.reannotation, reannotated.duplicate.proteins)
             
 ################################################################################
-## Save Tables S1, S2, and S3 as Source Data for Fig4ABC.
-write.csv(TableS1, "../results/Source-Data/Fig4A-Source-Data.csv", row.names=FALSE, quote=FALSE)
-write.csv(TableS2, "../results/Source-Data/Fig4B-Source-Data.csv", row.names=FALSE, quote=FALSE)
-write.csv(TableS3, "../results/Source-Data/Fig4C-Source-Data.csv", row.names=FALSE, quote=FALSE)
+## Save Tables S1, S2, and S3 as Source Data for Fig1ABC.
+##write.csv(TableS1, "../results/Source-Data/Fig1A-Source-Data.csv", row.names=FALSE, quote=FALSE)
+##write.csv(TableS2, "../results/Source-Data/Fig1B-Source-Data.csv", row.names=FALSE, quote=FALSE)
+##write.csv(TableS3, "../results/Source-Data/Fig1C-Source-Data.csv", row.names=FALSE, quote=FALSE)
 
-## Finally -- make Figure 4ABC.
-## Throughout, add special scales for Figure 4 but not for Supplementary Figure S14.
-Fig4A <- make.confint.figure.panel(TableS1, order.by.total.isolates, "D-ARGs") +
+## make Figure.
+## Throughout, add special scales for Figure 1.
+
+Fig1A <- make.confint.figure.panel(llama3.2.TableS1, order.by.total.isolates, "D-ARGs in genomes\nannotated by llama3.2") +
     scale_x_continuous(breaks = c(0, 0.15), limits = c(0,0.16))
 
+Fig1B <- make.confint.figure.panel(ground.truth.TableS1, order.by.total.isolates, "Maddamsetti et al. (2024)\nD-ARGs") +
+    scale_x_continuous(breaks = c(0, 0.15), limits = c(0,0.16))
 
-Fig4B <- make.confint.figure.panel(TableS2, order.by.total.isolates,
-                                   "S-ARGs", no.category.label=TRUE) +
-    scale_x_continuous(breaks = c(0.85, 1.0), limits = c(0.85,1))
+Fig1C <- make.confint.figure.panel(reannotated.TableS3, new.order.by.total.isolates,
+                                   "D-ARGs in genomes\nreannotated by llama3.2")
 
+Fig1D <- make.confint.figure.panel(TableS2, order.by.total.isolates,
+                                   "Maddamsetti et al. (2024)\nS-ARGs")
 
-Fig4C <- make.confint.figure.panel(TableS3, order.by.total.isolates,
-                                   "All D-genes", no.category.label=TRUE) +
-        scale_x_continuous(breaks = c(0.75, 0.95), limits = c(0.75, 1.0))
-
-
-Fig4ABC.title <- title_theme <- ggdraw() +
-    draw_label("Isolate-level analysis",fontface="bold")
-
-Fig4ABC <- plot_grid(Fig4A, Fig4B, Fig4C, labels=c('A','B','C'),
-                     rel_widths = c(1.5,1,1), nrow=1)
-
-Fig4ABC.with.title <- plot_grid(Fig4ABC.title, Fig4ABC, ncol = 1, rel_heights = c(0.1, 1))
+## This vector is used for ordering axes in figures and tables.
+new.order.by.total.isolates <- make.isolate.totals.col(gbk.reannotation)$Annotation
+Fig1E <- make.confint.figure.panel(reannotated.TableS2, new.order.by.total.isolates,
+                                   "S-ARGs in genomes\nreannotated by llama3.2")
 
 
-## show the plot
-Fig4ABC.with.title
+Fig1F <- make.confint.figure.panel(TableS3, order.by.total.isolates,
+                                   "Maddamsetti et al. (2024)\nAll D-genes")
+
+Fig1G <- make.confint.figure.panel(reannotated.TableS3, new.order.by.total.isolates,
+                                   "All D-genes in genomes\nreannotated by llama3.2")
+
+Fig1ABCDEFG <- plot_grid(
+    Fig1A, NULL, Fig1B, Fig1C, Fig1D, Fig1E, Fig1F, Fig1G,
+    labels=c('A', '', 'B', 'C', 'D', 'E', 'F', 'G'), nrow=4)
+
+ggsave("../results/Fig1ABCDEFG.pdf", Fig1ABCDEFG, height=8,width=7)
 
 
-
-
+## Adobe Firefly prompts:
+## a muscular cyborg rainbow unicorn with a face stripe like ziggy stardust and a long rainbow mane working hard on a laptop
+## a muscular cyborg rainbow llama with a face stripe like ziggy stardust and a long rainbow mane working hard on a laptop
