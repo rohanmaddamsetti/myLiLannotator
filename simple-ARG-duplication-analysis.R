@@ -388,8 +388,8 @@ reannotated.TableS2 <- make.TableS2(gbk.reannotation, reannotated.singleton.ARGs
 ## Data structure for Figure 1E.
 TableS3 <- make.TableS3(ground.truth.gbk.annotation, ground.truth.duplicate.proteins)
 
-## Data structure for Figure 1F
-reannotated.TableS3 <- make.TableS1(gbk.reannotation, reannotated.duplicate.proteins)
+## Data structure for Figure 1G
+reannotated.TableS3 <- make.TableS3(gbk.reannotation, reannotated.duplicate.proteins)
             
 ################################################################################
 ## Save Tables S1, S2, and S3 as Source Data for Fig1ABC.
@@ -406,7 +406,7 @@ Fig1A <- make.confint.figure.panel(llama3.2.TableS1, order.by.total.isolates, "D
 Fig1B <- make.confint.figure.panel(ground.truth.TableS1, order.by.total.isolates, "Maddamsetti et al. (2024)\nD-ARGs") +
     scale_x_continuous(breaks = c(0, 0.15), limits = c(0,0.16))
 
-Fig1C <- make.confint.figure.panel(reannotated.TableS3, new.order.by.total.isolates,
+Fig1C <- make.confint.figure.panel(reannotated.TableS1, new.order.by.total.isolates,
                                    "D-ARGs in genomes\nreannotated by llama3.2")
 
 Fig1D <- make.confint.figure.panel(TableS2, order.by.total.isolates,
