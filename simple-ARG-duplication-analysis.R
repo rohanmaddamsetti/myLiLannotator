@@ -109,7 +109,7 @@ read.LLM.gbk.annotation.csv <- function(gbk.annotation.path, ground.truth.gbk.an
 
 
 ##########################################################################
-## Functions for Figure 1.
+## Functions for Figure 2.
 
 ## See Wikipedia reference:
 ## https://en.wikipedia.org/wiki/Binomial_proportion_confidence_interval
@@ -217,7 +217,7 @@ make.confint.figure.panel <- function(Table, order.by.total.isolates, title,
         theme_classic() +
         ggtitle(title) +
         ## plot CIs.
-        geom_errorbarh(aes(xmin=Left,xmax=Right), height=0.2, linewidth=0.2)
+        geom_errorbar(aes(xmin=Left,xmax=Right), height=0.2, linewidth=0.2, orientation = "y")
     
     if (no.category.label)
         Fig.panel <- Fig.panel +
@@ -350,8 +350,6 @@ reannotated.duplicate.proteins <- ground.truth.duplicate.proteins %>%
 ##########################################################################
 ## Data structure for alluvial diagram of reannotations.
 
-head(ground.truth.gbk.annotation)
-
 manual.annotation.df <- ground.truth.gbk.annotation %>%
     select(Annotation_Accession, Annotation) %>%
     rename(Original = "Annotation")
@@ -375,21 +373,10 @@ alluvial.plot.df <- manual.annotation.df %>%
 ## validate the data.frame
 is_alluvia_form(alluvial.plot.df, axes = 1:3, silent = TRUE)
 
-## make the plot
-alluvial.plot <- ggplot(alluvial.plot.df,
-       aes(y = Count, axis1 = Original, axis2 = LLM, axis3 = Lifestyle)) +
-    geom_alluvium(aes(fill = Original), width = 1/12) +
-    geom_stratum(width = 1/12, fill = "black", color = "grey") +
-    geom_label(stat = "stratum", aes(label = after_stat(stratum))) +
-    scale_x_discrete(limits = c("Original", "LLM", "Lifestyle"), expand = c(.05, .05)) +
-    scale_fill_brewer(type = "qual", palette = "Set1") +
-    ggtitle("Microbial genomes reannotated with llama 3.2") +
-    theme_classic()
-
 ##########################################################################
-## Data structures for Figure 1AB.
+## Data structures for Figure 1BC.
 
-## Data structure for Figure 1AB:
+## Data structure for Figure 1BC:
 ## normal-approximation confidence intervals for the percentage
 ## of isolates with duplicated ARGs.
 ground.truth.TableS1 <- make.TableS1(ground.truth.gbk.annotation, ground.truth.duplicate.ARGs)
@@ -432,45 +419,59 @@ TableS3 <- make.TableS3(ground.truth.gbk.annotation, ground.truth.duplicate.prot
 reannotated.TableS3 <- make.TableS3(gbk.reannotation, reannotated.duplicate.proteins)
             
 ################################################################################
-## Save Tables S1, S2, and S3 as Source Data for Fig1ABC.
-##write.csv(TableS1, "../results/Source-Data/Fig1A-Source-Data.csv", row.names=FALSE, quote=FALSE)
-##write.csv(TableS2, "../results/Source-Data/Fig1B-Source-Data.csv", row.names=FALSE, quote=FALSE)
-##write.csv(TableS3, "../results/Source-Data/Fig1C-Source-Data.csv", row.names=FALSE, quote=FALSE)
+## Save Tables S1, S2, and S3 as Source Data for Fig1BCD.
+##write.csv(TableS1, "../results/Source-Data/Fig1B-Source-Data.csv", row.names=FALSE, quote=FALSE)
+##write.csv(TableS2, "../results/Source-Data/Fig1C-Source-Data.csv", row.names=FALSE, quote=FALSE)
+##write.csv(TableS3, "../results/Source-Data/Fig1D-Source-Data.csv", row.names=FALSE, quote=FALSE)
 
-## make Figure.
-## Throughout, add special scales for Figure 1.
+## make Figures.
+## Throughout, add special scales for panels as needed.
 
-Fig1A <- make.confint.figure.panel(llama3.2.TableS1, order.by.total.isolates, "D-ARGs in genomes\nannotated by llama3.2") +
-    scale_x_continuous(breaks = c(0, 0.15), limits = c(0,0.16))
-
-Fig1B <- make.confint.figure.panel(ground.truth.TableS1, order.by.total.isolates, "Maddamsetti et al. (2024)\nD-ARGs") +
-    scale_x_continuous(breaks = c(0, 0.15), limits = c(0,0.16))
-
-Fig1C <- make.confint.figure.panel(reannotated.TableS1, new.order.by.total.isolates,
-                                   "D-ARGs in genomes\nreannotated by llama3.2")
-
-Fig1D <- make.confint.figure.panel(TableS2, order.by.total.isolates,
-                                   "Maddamsetti et al. (2024)\nS-ARGs")
-
-## This vector is used for ordering axes in figures and tables.
+## This vector is used for ordering axes in figures and tables in the genomes reannotated by lifestyle
 new.order.by.total.isolates <- make.isolate.totals.col(gbk.reannotation)$Annotation
-Fig1E <- make.confint.figure.panel(reannotated.TableS2, new.order.by.total.isolates,
-                                   "S-ARGs in genomes\nreannotated by llama3.2")
+
+## make Figure 1A.
+Fig1A <- ggplot(alluvial.plot.df,
+       aes(y = Count, axis1 = Original, axis2 = LLM, axis3 = Lifestyle)) +
+    geom_alluvium(aes(fill = Original), width = 1/12) +
+    geom_stratum(width = 1/12, fill = "black", color = "grey") +
+    geom_label(stat = "stratum", size= 3.75, aes(label = after_stat(stratum))) +
+    scale_x_discrete(limits = c("Original", "LLM", "Lifestyle"), expand = c(0.09, 0.09)) +
+    scale_fill_brewer(type = "qual", palette = "Set1", name="Original annotation") +
+    ggtitle("Rapid ecological reannotation of microbial genomes with a large language model") +
+    theme_minimal() +
+    theme(legend.position="top")
+
+## add a bottom row of panels for D-ARGs.
+Fig1B <- make.confint.figure.panel(ground.truth.TableS1, order.by.total.isolates, "D-ARGs, original\nannotation") +
+    scale_x_continuous(breaks = c(0, 0.15), limits = c(0,0.16))
+
+Fig1C <- make.confint.figure.panel(llama3.2.TableS1, order.by.total.isolates, "D-ARGs, llama3.2\nannotation") +
+    scale_x_continuous(breaks = c(0, 0.15), limits = c(0,0.16))
+
+Fig1D <- make.confint.figure.panel(reannotated.TableS1, new.order.by.total.isolates,
+                                   "D-ARGs in genomes\nreannotated by lifestyle")
+
+Fig1BCD <- plot_grid(Fig1B, Fig1C, Fig1D, labels=c("B", "C", "D"), nrow=1)
+
+Fig1 <- plot_grid(Fig1A, Fig1BCD, labels=c("A", ""), nrow=2, rel_heights=c(3,1))
+ggsave("../results/Fig1.pdf", Fig1, height=7.5, width=9)
 
 
-Fig1F <- make.confint.figure.panel(TableS3, order.by.total.isolates,
-                                   "Maddamsetti et al. (2024)\nAll D-genes")
+ Fig2A <- make.confint.figure.panel(TableS2, order.by.total.isolates,
+                                   "S-ARGs, original\nannotation")
 
-Fig1G <- make.confint.figure.panel(reannotated.TableS3, new.order.by.total.isolates,
-                                   "All D-genes in genomes\nreannotated by llama3.2")
-
-Fig1ABCDEFG <- plot_grid(
-    Fig1A, alluvial.plot, Fig1B, Fig1C, Fig1D, Fig1E, Fig1F, Fig1G,
-    labels=c('A', 'B', 'C', 'D', 'E', 'F', 'G', 'H'), nrow=4)
-
-ggsave("../results/Fig1ABCDEFG.pdf", Fig1ABCDEFG, height=8,width=7)
+Fig2B <- make.confint.figure.panel(reannotated.TableS2, new.order.by.total.isolates,
+                                   "S-ARGs in genomes\nreannotated by lifestyle")
 
 
-## Adobe Firefly prompts:
-## a muscular cyborg rainbow unicorn with a face stripe like ziggy stardust and a long rainbow mane working hard on a laptop
-## a muscular cyborg rainbow llama with a face stripe like ziggy stardust and a long rainbow mane working hard on a laptop
+Fig2C <- make.confint.figure.panel(TableS3, order.by.total.isolates,
+                                   "All D-genes, original\nannotation")
+
+Fig2D <- make.confint.figure.panel(reannotated.TableS3, new.order.by.total.isolates,
+                                   "All D-genes in genomes\nreannotated by lifestyle")
+
+Fig2 <- plot_grid(Fig2A, Fig2B, Fig2C, Fig2D,
+                  labels=c('A', 'B', 'C', 'D'), nrow=2)    
+ggsave("../results/Fig2.pdf", Fig2, height=4,width=7)
+ 
